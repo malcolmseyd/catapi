@@ -24,15 +24,15 @@ type CLIOptions struct {
 
 func main() {
 	var opts CLIOptions
-	args, err := flags.Parse(&opts)
+	_, err := flags.Parse(&opts)
 	if err != nil {
 		os.Exit(1)
 	}
+
 	http.DefaultClient.Timeout = time.Second * 15
-	_ = args
-	catIds := make([]string, 0)
+	ids := make([]string, 0)
 	for {
-		resp, err := http.Get(fmt.Sprintf("%s/api/cats?limit=1000&skip=%d", URL, len(catIds)))
+		resp, err := http.Get(fmt.Sprintf("%s/api/cats?limit=1000&skip=%d", URL, len(ids)))
 		if err != nil {
 			log.Fatalln("failed to get cat list:", err)
 		}
@@ -49,36 +49,37 @@ func main() {
 			break
 		}
 		for _, v := range data {
-			catIds = append(catIds, v.Id)
+			ids = append(ids, v.Id)
 		}
-		log.Printf("fetched %v ids (%v total)", len(data), len(catIds))
+		log.Printf("fetched %v ids (%v total)", len(data), len(ids))
 	}
 
-	catIdChan := make(chan string, opts.MaxWorkers)
+	idChan := make(chan string, opts.MaxWorkers)
 	wg := sync.WaitGroup{}
 	wg.Add(opts.MaxWorkers)
 	for i := 0; i < opts.MaxWorkers; i++ {
-		go worker(&opts, catIdChan, &wg)
+		go worker(&opts, idChan, &wg)
 	}
 
-	for _, v := range catIds {
-		catIdChan <- v
+	for _, v := range ids {
+		idChan <- v
 	}
-	close(catIdChan)
+	close(idChan)
 	wg.Wait()
 }
 
-func worker(opts *CLIOptions, catIdChan chan string, wg *sync.WaitGroup) {
-	for id := range catIdChan {
+func worker(opts *CLIOptions, idChan <-chan string, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for id := range idChan {
 		succeeded := false
 		for tries := 0; !succeeded && tries < opts.Retries; tries++ {
 			if tries > 0 {
 				log.Printf("retrying %s\n", id)
 			}
+
 			resp, err := http.Get(URL + "/cat/" + id)
 			if err != nil {
 				log.Printf("error getting cat %s: %v\n", id, err)
-				catIdChan <- id
 				continue
 			}
 			if resp.StatusCode != 200 {
@@ -90,20 +91,22 @@ func worker(opts *CLIOptions, catIdChan chan string, wg *sync.WaitGroup) {
 				}
 				continue
 			}
-			outPathName := path.Join(opts.OutDir, id+".jpg")
-			outFile, err := os.Create(outPathName)
+
+			path := path.Join(opts.OutDir, id+".jpg")
+			file, err := os.Create(path)
 			if err != nil {
-				log.Printf("error creating image file %s: %v\n", outPathName, err)
+				log.Printf("error creating image file %s: %v\n", path, err)
 				continue
 			}
-			_, err = io.Copy(outFile, resp.Body)
+
+			_, err = io.Copy(file, resp.Body)
 			if err != nil {
-				log.Printf("error copying body to file %s: %v\n", outPathName, err)
+				log.Printf("error copying body to file %s: %v\n", path, err)
 				continue
 			}
+
 			succeeded = true
-			log.Printf("wrote %s to disk\n", outPathName)
+			log.Printf("wrote %s to disk\n", path)
 		}
 	}
-	wg.Done()
 }
