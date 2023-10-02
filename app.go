@@ -9,6 +9,7 @@ import (
 	"image/draw"
 	"image/jpeg"
 	"log"
+	"math/rand"
 	"os"
 	"path"
 	"strings"
@@ -27,13 +28,29 @@ func must[T any](value T, err error) T {
 	return value
 }
 
+const catImagePath = "img"
+
 var impactFont *sfnt.Font = must(opentype.Parse(must(os.ReadFile("impact.ttf"))))
+var catImageIds []string = make([]string, 0)
+
+func init() {
+	for _, entry := range must(os.ReadDir(catImagePath)) {
+		if entry.Type().IsRegular() {
+			catImageIds = append(catImageIds, strings.TrimSuffix(entry.Name(), ".jpg"))
+		}
+	}
+}
 
 func main() {
 	router := gin.Default()
-	router.GET("/cat/:id", func(c *gin.Context) {
-		img, err := getCatImage(c.Param("id"))
+	router.GET("/cat", func(c *gin.Context) {
+		id := c.Query("id")
+		if id == "" {
+			id = catImageIds[rand.Int()%len(catImageIds)]
+		}
+		img, err := getCatImage(id)
 		if errors.Is(err, os.ErrNotExist) {
+			log.Println("cat image 404:", err)
 			c.AbortWithStatus(404)
 			return
 		} else if err != nil {
@@ -51,8 +68,6 @@ func main() {
 	})
 	router.Run(":8080")
 }
-
-const catImagePath = "img"
 
 func getCatImage(id string) ([]byte, error) {
 	return os.ReadFile(path.Join(catImagePath, id+".jpg"))
@@ -91,15 +106,15 @@ func drawText(src image.Image, text string, face font.Face) image.Image {
 	lineHeight := face.Metrics().Height.Round()
 	totalHeight := lineHeight * len(lines)
 
-	dst := image.NewRGBA(src.Bounds())
-	draw.Draw(dst, src.Bounds(), src, image.Point{X: 0, Y: 0}, draw.Over)
-
 	originX := src.Bounds().Dx() / 2
 	originY := int(float64(src.Bounds().Dy()) * 0.77)
 	originY -= totalHeight / 2
 
 	whiteImg := image.NewUniform(color.RGBA{255, 255, 255, 255})
 	blackImg := image.NewUniform(color.Black)
+
+	dst := image.NewRGBA(src.Bounds())
+	draw.Draw(dst, src.Bounds(), src, image.Point{X: 0, Y: 0}, draw.Over)
 
 	drawer := &font.Drawer{
 		Dst:  dst,
