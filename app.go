@@ -53,6 +53,7 @@ func main() {
 		if id == "" {
 			id = catImageIds[rand.Int()%len(catImageIds)]
 		}
+		log.Println("using image with id", id)
 		img, err := getCatImage(id)
 		if errors.Is(err, os.ErrNotExist) {
 			log.Println("cat image 404:", err)
@@ -97,8 +98,12 @@ func makeMeme(rawImage []byte, text string) ([]byte, error) {
 
 		newFrames := make([]*image.Paletted, 0, len(img.Image))
 		for _, frame := range img.Image {
-			dst := image.NewPaletted(frame.Bounds(), frame.Palette)
-			draw.Draw(dst, frame.Bounds(), frame, image.Point{X: 0, Y: 0}, draw.Over)
+			// less likely to break palette when we just copy over
+			dst := new(image.Paletted)
+			*dst = *frame
+			dst.Pix = make([]uint8, len(frame.Pix))
+			copy(dst.Pix, frame.Pix)
+
 			drawText(frame, dst, text, face)
 			newFrames = append(newFrames, dst)
 		}
