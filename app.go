@@ -76,7 +76,8 @@ func main() {
 }
 
 func getCatImage(id string) ([]byte, error) {
-	return os.ReadFile(path.Join(catImagePath, id))
+	sanitizedId := path.Join("/", id)
+	return os.ReadFile(path.Join(catImagePath, sanitizedId))
 }
 
 func makeMeme(rawImage []byte, text string) ([]byte, error) {
