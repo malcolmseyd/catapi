@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -11,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gabriel-vasile/mimetype"
 	"github.com/jessevdk/go-flags"
 )
 
@@ -31,86 +31,43 @@ func main() {
 	}
 
 	http.DefaultClient.Timeout = time.Second * 15
-	// ids := make([]string, 0)
-	mimes := make(map[string]int)
+	ids := make([]string, 0)
 
-	entries, err := os.ReadDir("img")
-	if err != nil {
-		log.Fatalln("can't read image dir:", err)
-	}
-	for _, entry := range entries {
-		if entry.Type().IsDir() {
-			continue
-		}
-		filePath := path.Join("img", entry.Name())
-		file, err := os.Open(filePath)
+	for {
+		resp, err := http.Get(fmt.Sprintf("%s/api/cats?limit=1000&skip=%d", URL, len(ids)))
 		if err != nil {
-			log.Fatalln("can't open file", entry.Name()+":", err)
+			log.Fatalln("failed to get cat list:", err)
 		}
-		mime, err := mimetype.DetectReader(file)
+		defer resp.Body.Close()
+		var data []struct {
+			Id string `json:"_id"`
+		}
+		err = json.NewDecoder(resp.Body).Decode(&data)
 		if err != nil {
-			log.Fatalln("error reading", entry.Name()+":", err)
+			log.Fatalln("failed to parse cat list:", err)
 		}
-		file.Close()
-
-		mimes[mime.String()] += 1
-
-		// if !strings.HasSuffix(entry.Name(), mime.Extension()) {
-		// 	barePath, _, _ := strings.Cut(filePath, ".")
-		// 	err = os.Rename(filePath, barePath+mime.Extension())
-		// 	if err != nil {
-		// 		log.Println(err)
-		// 	}
-		// }
-
-		// mimes := suf
-		// _, err = jpeg.Decode(file)
-
-		// if err != nil {
-		// 	fmt.Println(file.Name (), err)
-		// 	ids = append(ids, file.Name())
-		// }
+		if len(data) == 0 {
+			// no more cats
+			break
+		}
+		for _, v := range data {
+			ids = append(ids, v.Id)
+		}
+		log.Printf("fetched %v ids (%v total)", len(data), len(ids))
 	}
 
-	for k, v := range mimes {
-		fmt.Println(k, "=", v)
+	idChan := make(chan string, opts.MaxWorkers)
+	wg := sync.WaitGroup{}
+	wg.Add(opts.MaxWorkers)
+	for i := 0; i < opts.MaxWorkers; i++ {
+		go worker(&opts, idChan, &wg)
 	}
 
-	// for {
-	// 	resp, err := http.Get(fmt.Sprintf("%s/api/cats?limit=1000&skip=%d", URL, len(ids)))
-	// 	if err != nil {
-	// 		log.Fatalln("failed to get cat list:", err)
-	// 	}
-	// 	defer resp.Body.Close()
-	// 	var data []struct {
-	// 		Id string `json:"_id"`
-	// 	}
-	// 	err = json.NewDecoder(resp.Body).Decode(&data)
-	// 	if err != nil {
-	// 		log.Fatalln("failed to parse cat list:", err)
-	// 	}
-	// 	if len(data) == 0 {
-	// 		// no more cats
-	// 		break
-	// 	}
-	// 	for _, v := range data {
-	// 		ids = append(ids, v.Id)
-	// 	}
-	// 	log.Printf("fetched %v ids (%v total)", len(data), len(ids))
-	// }
-
-	// idChan := make(chan string, opts.MaxWorkers)
-	// wg := sync.WaitGroup{}
-	// wg.Add(opts.MaxWorkers)
-	// for i := 0; i < opts.MaxWorkers; i++ {
-	// 	go worker(&opts, idChan, &wg)
-	// }
-
-	// for _, v := range ids {
-	// 	idChan <- v
-	// }
-	// close(idChan)
-	// wg.Wait()
+	for _, v := range ids {
+		idChan <- v
+	}
+	close(idChan)
+	wg.Wait()
 }
 
 func worker(opts *CLIOptions, idChan <-chan string, wg *sync.WaitGroup) {
@@ -144,9 +101,7 @@ func worker(opts *CLIOptions, idChan <-chan string, wg *sync.WaitGroup) {
 				continue
 			}
 
-			mime := mimetype.Detect(b.Bytes())
-
-			path := path.Join(opts.OutDir, id+mime.Extension())
+			path := path.Join(opts.OutDir, id)
 			file, err := os.Create(path)
 			if err != nil {
 				log.Printf("error creating image file %s: %v\n", path, err)

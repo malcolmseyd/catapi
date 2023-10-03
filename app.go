@@ -18,6 +18,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/gabriel-vasile/mimetype"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/opentype"
@@ -68,7 +69,7 @@ func main() {
 				return
 			}
 		}
-		c.Data(200, "image/jpeg", img)
+		c.Data(200, mimetype.Detect(img).String(), img)
 	})
 	router.Run(":8080")
 }
@@ -83,7 +84,7 @@ func makeMeme(rawImage []byte, text string) ([]byte, error) {
 		return nil, fmt.Errorf("can't make font face: %w", err)
 	}
 
-	_, format, err := image.Decode(bytes.NewReader(rawImage))
+	_, format, err := image.DecodeConfig(bytes.NewReader(rawImage))
 	if err != nil {
 		return nil, fmt.Errorf("can't decode image: %w", err)
 	}
