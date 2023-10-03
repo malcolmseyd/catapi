@@ -7,7 +7,11 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"image/gif"
+	_ "image/gif"
 	"image/jpeg"
+	_ "image/jpeg"
+	_ "image/png"
 	"log"
 	"math/rand"
 	"os"
@@ -36,7 +40,7 @@ var catImageIds []string = make([]string, 0)
 func init() {
 	for _, entry := range must(os.ReadDir(catImagePath)) {
 		if entry.Type().IsRegular() {
-			catImageIds = append(catImageIds, strings.TrimSuffix(entry.Name(), ".jpg"))
+			catImageIds = append(catImageIds, entry.Name())
 		}
 	}
 }
@@ -70,28 +74,58 @@ func main() {
 }
 
 func getCatImage(id string) ([]byte, error) {
-	return os.ReadFile(path.Join(catImagePath, id+".jpg"))
+	return os.ReadFile(path.Join(catImagePath, id))
 }
 
 func makeMeme(rawImage []byte, text string) ([]byte, error) {
-	img, err := jpeg.Decode(bytes.NewReader(rawImage))
-	if err != nil {
-		return nil, fmt.Errorf("can't decode image: %w", err)
-	}
-
 	face, err := makeFace()
 	if err != nil {
 		return nil, fmt.Errorf("can't make font face: %w", err)
 	}
 
-	dst := drawText(img, text, face)
-
-	outBuf := bytes.NewBuffer(nil)
-	err = jpeg.Encode(outBuf, dst, nil)
+	_, format, err := image.Decode(bytes.NewReader(rawImage))
 	if err != nil {
-		return nil, fmt.Errorf("can't encode image: %w", err)
+		return nil, fmt.Errorf("can't decode image: %w", err)
 	}
-	return outBuf.Bytes(), nil
+
+	if format == "gif" {
+		img, err := gif.DecodeAll(bytes.NewReader(rawImage))
+		if err != nil {
+			return nil, fmt.Errorf("can't decode gif: %w", err)
+		}
+
+		newFrames := make([]*image.Paletted, 0, len(img.Image))
+		for _, frame := range img.Image {
+			dst := image.NewPaletted(frame.Bounds(), frame.Palette)
+			draw.Draw(dst, frame.Bounds(), frame, image.Point{X: 0, Y: 0}, draw.Over)
+			drawText(frame, dst, text, face)
+			newFrames = append(newFrames, dst)
+		}
+		img.Image = newFrames
+
+		outBuf := bytes.NewBuffer(nil)
+		err = gif.EncodeAll(outBuf, img)
+		if err != nil {
+			return nil, fmt.Errorf("can't encode gif: %w", err)
+		}
+		return outBuf.Bytes(), nil
+	} else {
+		src, _, err := image.Decode(bytes.NewReader(rawImage))
+		if err != nil {
+			return nil, fmt.Errorf("can't decode image: %w", err)
+		}
+
+		dst := image.NewRGBA(src.Bounds())
+		draw.Draw(dst, src.Bounds(), src, image.Point{X: 0, Y: 0}, draw.Over)
+		drawText(src, dst, text, face)
+
+		outBuf := bytes.NewBuffer(nil)
+		err = jpeg.Encode(outBuf, dst, nil)
+		if err != nil {
+			return nil, fmt.Errorf("can't encode jpeg: %w", err)
+		}
+		return outBuf.Bytes(), nil
+	}
 }
 
 func makeFace() (font.Face, error) {
@@ -100,21 +134,18 @@ func makeFace() (font.Face, error) {
 	})
 }
 
-func drawText(src image.Image, text string, face font.Face) image.Image {
+func drawText(src image.Image, dst draw.Image, text string, face font.Face) image.Image {
 	lines := strings.Split(text, "\n")
 
 	lineHeight := face.Metrics().Height.Round()
 	totalHeight := lineHeight * len(lines)
 
-	originX := src.Bounds().Dx() / 2
+	originX := src.Bounds().Dx() / 2 // horizinally center
 	originY := int(float64(src.Bounds().Dy()) * 0.77)
-	originY -= totalHeight / 2
+	originY -= totalHeight / 2 // vertically center on original originY
 
 	whiteImg := image.NewUniform(color.RGBA{255, 255, 255, 255})
 	blackImg := image.NewUniform(color.Black)
-
-	dst := image.NewRGBA(src.Bounds())
-	draw.Draw(dst, src.Bounds(), src, image.Point{X: 0, Y: 0}, draw.Over)
 
 	drawer := &font.Drawer{
 		Dst:  dst,
