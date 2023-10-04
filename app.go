@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -14,9 +15,12 @@ import (
 	_ "image/png"
 	"log"
 	"math/rand"
+	"net/http"
 	"os"
 	"path"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/gin-gonic/gin"
@@ -70,7 +74,18 @@ func main() {
 				return
 			}
 		}
+
+		isGithubBot := strings.Contains(c.Request.UserAgent(), "github-camo")
+		if isGithubBot {
+			c.Header("Cache-Control", "no-cache")
+		}
+
 		c.Data(200, mimetype.Detect(img).String(), img)
+
+		if isGithubBot {
+			time.Sleep(time.Millisecond * 200)
+			purgeSelf()
+		}
 	})
 	router.Run(":8080")
 }
@@ -174,4 +189,57 @@ func drawText(src image.Image, dst draw.Image, text string, face font.Face) imag
 	}
 
 	return dst
+}
+
+func purgeSelf() {
+	client := http.Client{Timeout: 10 * time.Second}
+
+	selfURL, err := getSelfURL(&client)
+	if err != nil {
+		log.Println("failed to get self url:", err)
+		return
+	}
+
+	purgeReq, err := http.NewRequest("PURGE", selfURL, nil)
+	if err != nil {
+		log.Println("bad url in purge request:", err)
+		return
+	}
+
+	_, err = client.Do(purgeReq)
+	if err != nil {
+		log.Println("failed to purge self:", err)
+		return
+	}
+	log.Println("successfully purged!")
+}
+
+var selfURLPattern = regexp.MustCompile(`<img[^>]+alt="cat"[^>]+ src="(https:\/\/camo[^"]*)"[^>]*>`)
+
+func getSelfURL(client *http.Client) (string, error) {
+	req, _ := http.NewRequest("GET", "https://github.com/malcolmseyd/malcolmseyd/blob/main/README.md", nil)
+	req.Header.Add("Accept", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to request readme: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var body struct {
+		Payload struct {
+			Blob struct {
+				RichText string `json:"richText"`
+			} `json:"blob"`
+		} `json:"payload"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&body)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode json body: %w", err)
+	}
+
+	matches := selfURLPattern.FindStringSubmatch(body.Payload.Blob.RichText)
+	if len(matches) < 2 {
+		return "", fmt.Errorf("no match in readme")
+	}
+	return matches[1], nil
 }
