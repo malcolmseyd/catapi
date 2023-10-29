@@ -112,18 +112,14 @@ func makeMeme(rawImage []byte, text string) ([]byte, error) {
 			return nil, fmt.Errorf("can't decode gif: %w", err)
 		}
 
-		newFrames := make([]*image.Paletted, 0, len(img.Image))
 		for _, frame := range img.Image {
-			// less likely to break palette when we just copy over
-			dst := new(image.Paletted)
-			*dst = *frame
-			dst.Pix = make([]uint8, len(frame.Pix))
-			copy(dst.Pix, frame.Pix)
-
-			drawText(frame, dst, text, face)
-			newFrames = append(newFrames, dst)
+			white := frame.Palette.Convert(color.RGBA{R: 255, G: 255, B: 255, A: 255})
+			black := frame.Palette.Convert(color.Black)
+			// optimizePaletted(frame, white, black)
+			whiteImg := image.Uniform{C: white}
+			blackImg := image.Uniform{C: black}
+			drawGif(frame, text, face, &whiteImg, &blackImg)
 		}
-		img.Image = newFrames
 
 		outBuf := bytes.NewBuffer(nil)
 		err = gif.EncodeAll(outBuf, img)
@@ -156,7 +152,70 @@ func makeFace() (font.Face, error) {
 	})
 }
 
-func drawText(src image.Image, dst draw.Image, text string, face font.Face) image.Image {
+// ASSUMPTION: `black` and `white` are always in the pallete if this is called
+// ASSUMPTION: palette is non-empty
+func optimizePaletted(img *image.Paletted, white color.Color, black color.Color) {
+	// TODO: fix weird white fringing
+	// id=Fk4koFgPTqBIf2hE
+	// id=kopgb6Rqf64osubp
+	wr, wg, wb, wa := white.RGBA()
+	br, bg, bb, ba := black.RGBA()
+	dst := uint8(len(img.Palette) - 1)
+	// translations := [256]uint8{}
+	translations := make([]uint8, len(img.Palette))
+	// shuffle colors to the right
+	for src := dst; src >= 2; src-- {
+		r, g, b, a := img.Palette[src].RGBA()
+		if r == wr && b == wb && g == wg && a == wa {
+			translations[src] = 0
+			continue
+		}
+		if r == br && b == bb && g == bg && a == ba {
+			translations[src] = 1
+			continue
+		}
+		img.Palette[dst] = img.Palette[src]
+		translations[src] = dst
+		dst--
+	}
+	img.Palette[0] = white
+	img.Palette[1] = black
+	for i := range img.Pix {
+		img.Pix[i] = translations[img.Pix[i]]
+	}
+}
+
+func drawGif(img *image.Paletted, text string, face font.Face, white *image.Uniform, black *image.Uniform) {
+	lines := strings.Split(text, "\n")
+
+	lineHeight := face.Metrics().Height.Round()
+	totalHeight := lineHeight * len(lines)
+
+	originX := img.Bounds().Dx() / 2 // horizinally center
+	originY := int(float64(img.Bounds().Dy()) * 0.77)
+	originY -= totalHeight / 2 // vertically center on original originY
+
+	drawer := &font.Drawer{
+		Dst:  img,
+		Face: face,
+	}
+
+	for i, line := range lines {
+		adv := drawer.MeasureString(line)
+		x := originX - (adv.Round() / 2)
+		y := originY + lineHeight*i
+
+		drawer.Dot = fixed.P(x+1, y+1)
+		drawer.Src = black
+		drawer.DrawString(line)
+
+		drawer.Dot = fixed.P(x, y)
+		drawer.Src = white
+		drawer.DrawString(line)
+	}
+}
+
+func drawText(src image.Image, dst draw.Image, text string, face font.Face) {
 	lines := strings.Split(text, "\n")
 
 	lineHeight := face.Metrics().Height.Round()
@@ -187,8 +246,6 @@ func drawText(src image.Image, dst draw.Image, text string, face font.Face) imag
 		drawer.Src = whiteImg
 		drawer.DrawString(line)
 	}
-
-	return dst
 }
 
 func purgeSelf() {
