@@ -13,6 +13,7 @@ import (
 	_ "image/png"
 	"log"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"path"
@@ -39,12 +40,17 @@ const catImagePath = "img"
 
 var impactFont *sfnt.Font = must(opentype.Parse(must(os.ReadFile("impact.ttf"))))
 var catImageIds []string = make([]string, 0)
+var listenHost string = os.Getenv("LISTEN_HOST")
+var listenPort string = os.Getenv("LISTEN_PORT")
 
 func init() {
 	for _, entry := range must(os.ReadDir(catImagePath)) {
 		if entry.Type().IsRegular() {
 			catImageIds = append(catImageIds, entry.Name())
 		}
+	}
+	if listenPort == "" {
+		listenPort = "8080"
 	}
 }
 
@@ -85,7 +91,7 @@ func main() {
 			purgeSelf()
 		}
 	})
-	router.Run(":8080")
+	router.Run(net.JoinHostPort(listenHost, listenPort))
 }
 
 func getCatImage(id string) ([]byte, error) {
