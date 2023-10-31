@@ -1,16 +1,42 @@
-package main
+package imageproc
 
 import (
 	"image"
 	"image/color"
+	"strings"
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/math/fixed"
 )
 
-type Point struct {
-	X int
-	Y int
+func DrawTextGif(img *image.Paletted, text string, face font.Face, white *image.Uniform, black *image.Uniform) {
+	lines := strings.Split(text, "\n")
+
+	lineHeight := face.Metrics().Height.Round()
+	totalHeight := lineHeight * len(lines)
+
+	originX := img.Bounds().Dx() / 2 // horizinally center
+	originY := int(float64(img.Bounds().Dy()) * 0.77)
+	originY -= totalHeight / 2 // vertically center on original originY
+
+	drawer := &GifDrawer{
+		Dst:  img,
+		Face: face,
+	}
+
+	for i, line := range lines {
+		adv := font.MeasureString(face, line)
+		x := originX - (adv.Round() / 2)
+		y := originY + lineHeight*i
+
+		drawer.Dot = fixed.P(x+1, y+1)
+		drawer.Src = black
+		drawer.DrawString(line)
+
+		drawer.Dot = fixed.P(x, y)
+		drawer.Src = white
+		drawer.DrawString(line)
+	}
 }
 
 type GifDrawer struct {

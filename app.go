@@ -1,15 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"image"
-	"image/color"
-	"image/draw"
-	"image/gif"
-	"image/jpeg"
 	_ "image/png"
 	"log"
 	"math/rand"
@@ -23,10 +17,7 @@ import (
 
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/gin-gonic/gin"
-	"golang.org/x/image/font"
-	"golang.org/x/image/font/opentype"
-	"golang.org/x/image/font/sfnt"
-	"golang.org/x/image/math/fixed"
+	"github.com/malcolmseyd/catapi/imageproc"
 )
 
 func must[T any](value T, err error) T {
@@ -38,7 +29,6 @@ func must[T any](value T, err error) T {
 
 const catImagePath = "img"
 
-var impactFont *sfnt.Font = must(opentype.Parse(must(os.ReadFile("impact.ttf"))))
 var catImageIds []string = make([]string, 0)
 var listenHost string = os.Getenv("LISTEN_HOST")
 var listenPort string = os.Getenv("LISTEN_PORT")
@@ -72,7 +62,7 @@ func main() {
 			return
 		}
 		if memeText := c.Query("text"); memeText != "" {
-			img, err = makeMeme(img, memeText)
+			img, err = imageproc.MakeMeme(img, memeText)
 			if err != nil {
 				c.AbortWithError(500, err)
 				return
@@ -97,131 +87,6 @@ func main() {
 func getCatImage(id string) ([]byte, error) {
 	sanitizedId := path.Join("/", id)
 	return os.ReadFile(path.Join(catImagePath, sanitizedId))
-}
-
-func makeMeme(rawImage []byte, text string) ([]byte, error) {
-	_, format, err := image.DecodeConfig(bytes.NewReader(rawImage))
-	if err != nil {
-		return nil, fmt.Errorf("can't decode image: %w", err)
-	}
-
-	if format == "gif" {
-		face, err := makeFace(font.HintingFull)
-		if err != nil {
-			return nil, fmt.Errorf("can't make font face: %w", err)
-		}
-
-		img, err := gif.DecodeAll(bytes.NewReader(rawImage))
-		if err != nil {
-			return nil, fmt.Errorf("can't decode gif: %w", err)
-		}
-
-		for _, frame := range img.Image {
-			white := frame.Palette.Convert(color.RGBA{R: 255, G: 255, B: 255, A: 255})
-			black := frame.Palette.Convert(color.Black)
-			// optimizePaletted(frame, white, black)
-			whiteImg := image.Uniform{C: white}
-			blackImg := image.Uniform{C: black}
-			drawGif(frame, text, face, &whiteImg, &blackImg)
-		}
-
-		outBuf := bytes.NewBuffer(nil)
-		err = gif.EncodeAll(outBuf, img)
-		if err != nil {
-			return nil, fmt.Errorf("can't encode gif: %w", err)
-		}
-		return outBuf.Bytes(), nil
-	} else {
-		face, err := makeFace(font.HintingFull)
-		if err != nil {
-			return nil, fmt.Errorf("can't make font face: %w", err)
-		}
-
-		src, _, err := image.Decode(bytes.NewReader(rawImage))
-		if err != nil {
-			return nil, fmt.Errorf("can't decode image: %w", err)
-		}
-
-		dst := image.NewRGBA(src.Bounds())
-		draw.Draw(dst, src.Bounds(), src, image.Point{X: 0, Y: 0}, draw.Over)
-		drawText(src, dst, text, face)
-
-		outBuf := bytes.NewBuffer(nil)
-		err = jpeg.Encode(outBuf, dst, nil)
-		if err != nil {
-			return nil, fmt.Errorf("can't encode jpeg: %w", err)
-		}
-		return outBuf.Bytes(), nil
-	}
-}
-
-func makeFace(hinting font.Hinting) (font.Face, error) {
-	return opentype.NewFace(impactFont, &opentype.FaceOptions{
-		Size: 30, DPI: 72, Hinting: hinting,
-	})
-}
-
-func drawGif(img *image.Paletted, text string, face font.Face, white *image.Uniform, black *image.Uniform) {
-	lines := strings.Split(text, "\n")
-
-	lineHeight := face.Metrics().Height.Round()
-	totalHeight := lineHeight * len(lines)
-
-	originX := img.Bounds().Dx() / 2 // horizinally center
-	originY := int(float64(img.Bounds().Dy()) * 0.77)
-	originY -= totalHeight / 2 // vertically center on original originY
-
-	drawer := &GifDrawer{
-		Dst:  img,
-		Face: face,
-	}
-
-	for i, line := range lines {
-		adv := font.MeasureString(face, line)
-		x := originX - (adv.Round() / 2)
-		y := originY + lineHeight*i
-
-		drawer.Dot = fixed.P(x+1, y+1)
-		drawer.Src = black
-		drawer.DrawString(line)
-
-		drawer.Dot = fixed.P(x, y)
-		drawer.Src = white
-		drawer.DrawString(line)
-	}
-}
-
-func drawText(src image.Image, dst draw.Image, text string, face font.Face) {
-	lines := strings.Split(text, "\n")
-
-	lineHeight := face.Metrics().Height.Round()
-	totalHeight := lineHeight * len(lines)
-
-	originX := src.Bounds().Dx() / 2 // horizinally center
-	originY := int(float64(src.Bounds().Dy()) * 0.77)
-	originY -= totalHeight / 2 // vertically center on original originY
-
-	whiteImg := image.NewUniform(color.RGBA{255, 255, 255, 255})
-	blackImg := image.NewUniform(color.Black)
-
-	drawer := &font.Drawer{
-		Dst:  dst,
-		Face: face,
-	}
-
-	for i, line := range lines {
-		adv := drawer.MeasureString(line)
-		x := originX - (adv.Round() / 2)
-		y := originY + lineHeight*i
-
-		drawer.Dot = fixed.P(x+1, y+1)
-		drawer.Src = blackImg
-		drawer.DrawString(line)
-
-		drawer.Dot = fixed.P(x, y)
-		drawer.Src = whiteImg
-		drawer.DrawString(line)
-	}
 }
 
 func purgeSelf() {
