@@ -15,12 +15,12 @@ Get a random cat
 
 Get a random cat with a message overlayed
 ```
-/cat?msg=[MESSAGE]
+/cat?text=[MESSAGE]
 ```
 
 Get a specific cat (mostly for debugging)
 ```
-/cat?id=[IMAGE_ID]
+/cat?text=[IMAGE_ID]
 ```
 
 ## Running
