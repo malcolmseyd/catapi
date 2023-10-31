@@ -48,6 +48,9 @@ type GifDrawer struct {
 	Dot fixed.Point26_6
 }
 
+// DrawString draws a string onto the image. For performance reasons, the font
+// has no anti-aliasing when being rendered. This tradeoff allows a large
+// performance increase font.Drawer's DrawString (go run the benchmarks!)
 func (d *GifDrawer) DrawString(s string) {
 	colorIdx := d.Dst.Palette.Index(d.Src.C)
 	prevC := rune(-1)

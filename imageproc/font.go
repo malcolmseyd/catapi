@@ -16,7 +16,15 @@ func must[T any](value T, err error) T {
 	return value
 }
 
-var impactFont *sfnt.Font = must(opentype.Parse(must(os.ReadFile("impact.ttf"))))
+var impactFont *sfnt.Font
+
+func init() {
+	impactFilename := os.Getenv("IMPACT_FILENAME")
+	if impactFilename == "" {
+		impactFilename = "impact.ttf"
+	}
+	impactFont = must(opentype.Parse(must(os.ReadFile(impactFilename))))
+}
 
 func makeFace(hinting font.Hinting) (font.Face, error) {
 	return opentype.NewFace(impactFont, &opentype.FaceOptions{
