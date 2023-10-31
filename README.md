@@ -2,6 +2,8 @@
 
 This is a web API for serving cat images! More generally, it serves a random image from a folder, optionally drawing meme text on it. It supports JPEG, PNG, and GIF images.
 
+As of writing, I have an instance hosted at https://catapi.seyd.ca, go check it out!
+
 This project is shamelessly inspired by https://cataas.com/
 
 ## API
