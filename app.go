@@ -9,9 +9,7 @@ import (
 	"image/color"
 	"image/draw"
 	"image/gif"
-	_ "image/gif"
 	"image/jpeg"
-	_ "image/jpeg"
 	_ "image/png"
 	"log"
 	"math/rand"
@@ -96,17 +94,17 @@ func getCatImage(id string) ([]byte, error) {
 }
 
 func makeMeme(rawImage []byte, text string) ([]byte, error) {
-	face, err := makeFace()
-	if err != nil {
-		return nil, fmt.Errorf("can't make font face: %w", err)
-	}
-
 	_, format, err := image.DecodeConfig(bytes.NewReader(rawImage))
 	if err != nil {
 		return nil, fmt.Errorf("can't decode image: %w", err)
 	}
 
 	if format == "gif" {
+		face, err := makeFace(font.HintingFull)
+		if err != nil {
+			return nil, fmt.Errorf("can't make font face: %w", err)
+		}
+
 		img, err := gif.DecodeAll(bytes.NewReader(rawImage))
 		if err != nil {
 			return nil, fmt.Errorf("can't decode gif: %w", err)
@@ -128,6 +126,11 @@ func makeMeme(rawImage []byte, text string) ([]byte, error) {
 		}
 		return outBuf.Bytes(), nil
 	} else {
+		face, err := makeFace(font.HintingFull)
+		if err != nil {
+			return nil, fmt.Errorf("can't make font face: %w", err)
+		}
+
 		src, _, err := image.Decode(bytes.NewReader(rawImage))
 		if err != nil {
 			return nil, fmt.Errorf("can't decode image: %w", err)
@@ -146,43 +149,10 @@ func makeMeme(rawImage []byte, text string) ([]byte, error) {
 	}
 }
 
-func makeFace() (font.Face, error) {
+func makeFace(hinting font.Hinting) (font.Face, error) {
 	return opentype.NewFace(impactFont, &opentype.FaceOptions{
-		Size: 30, DPI: 72, Hinting: font.HintingFull,
+		Size: 30, DPI: 72, Hinting: hinting,
 	})
-}
-
-// ASSUMPTION: `black` and `white` are always in the pallete if this is called
-// ASSUMPTION: palette is non-empty
-func optimizePaletted(img *image.Paletted, white color.Color, black color.Color) {
-	// TODO: fix weird white fringing
-	// id=Fk4koFgPTqBIf2hE
-	// id=kopgb6Rqf64osubp
-	wr, wg, wb, wa := white.RGBA()
-	br, bg, bb, ba := black.RGBA()
-	dst := uint8(len(img.Palette) - 1)
-	// translations := [256]uint8{}
-	translations := make([]uint8, len(img.Palette))
-	// shuffle colors to the right
-	for src := dst; src >= 2; src-- {
-		r, g, b, a := img.Palette[src].RGBA()
-		if r == wr && b == wb && g == wg && a == wa {
-			translations[src] = 0
-			continue
-		}
-		if r == br && b == bb && g == bg && a == ba {
-			translations[src] = 1
-			continue
-		}
-		img.Palette[dst] = img.Palette[src]
-		translations[src] = dst
-		dst--
-	}
-	img.Palette[0] = white
-	img.Palette[1] = black
-	for i := range img.Pix {
-		img.Pix[i] = translations[img.Pix[i]]
-	}
 }
 
 func drawGif(img *image.Paletted, text string, face font.Face, white *image.Uniform, black *image.Uniform) {
@@ -195,13 +165,13 @@ func drawGif(img *image.Paletted, text string, face font.Face, white *image.Unif
 	originY := int(float64(img.Bounds().Dy()) * 0.77)
 	originY -= totalHeight / 2 // vertically center on original originY
 
-	drawer := &font.Drawer{
+	drawer := &GifDrawer{
 		Dst:  img,
 		Face: face,
 	}
 
 	for i, line := range lines {
-		adv := drawer.MeasureString(line)
+		adv := font.MeasureString(face, line)
 		x := originX - (adv.Round() / 2)
 		y := originY + lineHeight*i
 
