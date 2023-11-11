@@ -46,42 +46,57 @@ func init() {
 
 func main() {
 	router := gin.Default()
-	router.GET("/cat", func(c *gin.Context) {
-		id := c.Query("id")
-		if id == "" {
-			id = catImageIds[rand.Int()%len(catImageIds)]
+	router.GET("/cat", catHandler)
+
+	api := router.Group("/api")
+	api.GET("/random-id", func(c *gin.Context) {
+		var result struct {
+			Id string `json:"id"`
 		}
-		log.Println("using image with id", id)
-		img, err := getCatImage(id)
-		if errors.Is(err, os.ErrNotExist) {
-			log.Println("cat image 404:", err)
-			c.AbortWithStatus(404)
-			return
-		} else if err != nil {
+		result.Id = catImageIds[rand.Intn(len(catImageIds))]
+		c.JSON(200, result)
+	})
+
+	router.SetTrustedProxies(nil)
+	router.Run(net.JoinHostPort(listenHost, listenPort))
+}
+
+func catHandler(c *gin.Context) {
+	id := c.Query("id")
+	if id == "" {
+		id = catImageIds[rand.Int()%len(catImageIds)]
+	}
+	log.Println("using image with id", id)
+
+	img, err := getCatImage(id)
+	if errors.Is(err, os.ErrNotExist) {
+		log.Println("cat image 404:", err)
+		c.AbortWithStatus(404)
+		return
+	} else if err != nil {
+		c.AbortWithError(500, err)
+		return
+	}
+
+	if memeText := c.Query("text"); memeText != "" {
+		img, err = imageproc.MakeMeme(img, memeText)
+		if err != nil {
 			c.AbortWithError(500, err)
 			return
 		}
-		if memeText := c.Query("text"); memeText != "" {
-			img, err = imageproc.MakeMeme(img, memeText)
-			if err != nil {
-				c.AbortWithError(500, err)
-				return
-			}
-		}
+	}
 
-		isGithubBot := strings.Contains(c.Request.UserAgent(), "github-camo")
-		if isGithubBot {
-			c.Header("Cache-Control", "no-cache")
-		}
+	isGithubBot := strings.Contains(c.Request.UserAgent(), "github-camo")
+	if isGithubBot {
+		c.Header("Cache-Control", "no-cache")
+	}
 
-		c.Data(200, mimetype.Detect(img).String(), img)
+	c.Data(200, mimetype.Detect(img).String(), img)
 
-		if isGithubBot {
-			time.Sleep(time.Millisecond * 200)
-			purgeSelf()
-		}
-	})
-	router.Run(net.JoinHostPort(listenHost, listenPort))
+	if isGithubBot {
+		time.Sleep(time.Millisecond * 200)
+		purgeSelf()
+	}
 }
 
 func getCatImage(id string) ([]byte, error) {
