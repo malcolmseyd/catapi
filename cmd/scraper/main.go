@@ -107,9 +107,9 @@ func worker(opts *CLIOptions, idChan <-chan string, wg *sync.WaitGroup) {
 				log.Printf("error creating image file %s: %v\n", path, err)
 				continue
 			}
-			defer file.Close()
 
 			_, err = io.Copy(file, b)
+			file.Close()
 			if err != nil {
 				log.Printf("error copying body to file %s: %v\n", path, err)
 				continue
